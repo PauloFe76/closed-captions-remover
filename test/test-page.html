@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Subtitle Cleaner — Test Harness</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 20px; max-width: 700px; margin: auto; }
+    .case { border: 1px solid #ddd; padding: 10px; margin-bottom: 8px; border-radius: 4px; }
+    .case.pass { border-left: 6px solid #2ecc71; }
+    .case.fail { border-left: 6px solid #e74c3c; }
+    .label { font-weight: 600; }
+    .mono { font-family: monospace; font-size: 13px; }
+    #summary { font-weight: bold; margin-top: 16px; }
+
+    /* Estructura real de Netflix: contenedor > span wrapper > span hoja */
+    .player-timedtext-text-container { display: block; }
+  </style>
+</head>
+<body>
+  <h1>Subtitle Cleaner — Test Harness</h1>
+  <p>Nota: requiere "Permitir acceso a las URLs de archivos" habilitado para la extensión en chrome://extensions, porque el manifest matchea <code>file:///*</code> para que el content script real corra sobre esta página.</p>
+
+  <div id="results"></div>
+  <div id="summary"></div>
+
+  <!-- Cada caso instancia su propio contenedor, oculto hasta que se corre el test -->
+  <div id="sandbox" style="display: none;"></div>
+
+  <script>
+    // Estado de reglas usado para correr los tests: replica el default del
+    // popup (corchetes ON, speaker label ON, paréntesis OFF).
+    const DEFAULT_RULE_STATES = {
+      brackets: true,
+      speakerLabel: true,
+      parentheses: false,
+    };
+
+    const CASES = [
+      {
+        id: 'brackets_simple',
+        input: '[music playing]',
+        expectedText: '',
+        expectHidden: true,
+      },
+      {
+        id: 'brackets_with_dialogue',
+        input: '[door creaking] Who\'s there?',
+        expectedText: "Who's there?",
+        expectHidden: false,
+      },
+      {
+        id: 'multiple_brackets',
+        input: '[music playing] [indistinct chatter]',
+        expectedText: '',
+        expectHidden: true,
+      },
+      {
+        id: 'speaker_label_only',
+        input: 'JOHN:',
+        expectedText: '',
+        expectHidden: true,
+      },
+      {
+        id: 'speaker_label_with_brackets',
+        input: 'JOHN: [sighs] I told you already.',
+        expectedText: 'I told you already.',
+        expectHidden: false,
+      },
+      {
+        id: 'pure_dialogue_control',
+        input: "I can't believe this is happening.",
+        expectedText: "I can't believe this is happening.",
+        expectHidden: false,
+      },
+      {
+        id: 'parentheses_untouched',
+        input: '(laughs) That was close.',
+        // parentheses está OFF por defecto -> no se toca
+        expectedText: '(laughs) That was close.',
+        expectHidden: false,
+      },
+      {
+        id: 'malformed_bracket',
+        input: '[music playing without closing bracket',
+        // no matchea el regex (falta el ]), no debe romper ni vaciar
+        expectedText: '[music playing without closing bracket',
+        expectHidden: false,
+      },
+      {
+        id: 'two_lines_different_speakers',
+        input: "MARY: Wait.\nJOHN: For what?",
+        // el regex de speaker label es ^...: por línea sin flag "m",
+        // así que solo el primer speaker de la línea 1 se limpia si se
+        // trata como un único texto de span; documentado como
+        // comportamiento esperado, no bug.
+        expectedText: 'Wait.\nJOHN: For what?',
+        expectHidden: false,
+      },
+      {
+        id: 'speaker_apostrophe_hyphen',
+        input: "MARY-ANNE'S VOICE: Come in.",
+        expectedText: 'Come in.',
+        expectHidden: false,
+      },
+    ];
+
+    function buildCaseDOM(testCase) {
+      const container = document.createElement('div');
+      container.className = 'player-timedtext-text-container';
+      container.id = `container-${testCase.id}`;
+
+      const wrapper = document.createElement('span');
+      const leaf = document.createElement('span');
+      leaf.textContent = testCase.input;
+
+      wrapper.appendChild(leaf);
+      container.appendChild(wrapper);
+      return container;
+    }
+
+    async function runTests() {
+      // El content script real (cleaner.js + netflix.js) ya está corriendo
+      // sobre esta página porque el manifest matchea file:///*.
+      // Le seteamos el estado de reglas esperado antes de inyectar los casos.
+      if (typeof SubtitleCleaner === 'undefined') {
+        document.getElementById('summary').textContent =
+          '⚠️ SubtitleCleaner no está definido — ¿está la extensión cargada y con acceso a archivos habilitado?';
+        return;
+      }
+      SubtitleCleaner.setRuleStates(DEFAULT_RULE_STATES);
+      chrome?.storage?.local?.set?.({
+        subtitleCleanerEnabled: true,
+        subtitleCleanerRuleStates: DEFAULT_RULE_STATES,
+      });
+
+      const sandbox = document.getElementById('sandbox');
+      const resultsEl = document.getElementById('results');
+      let passCount = 0;
+
+      for (const testCase of CASES) {
+        const container = buildCaseDOM(testCase);
+        sandbox.appendChild(container);
+
+        // darle un tick al MutationObserver para que procese la inserción
+        await new Promise((r) => setTimeout(r, 50));
+
+        const leaf = container.querySelector('span span') || container.querySelector('span');
+        const actualText = leaf.textContent;
+        const actualHidden = container.style.display === 'none';
+
+        const textOk = actualText === testCase.expectedText;
+        const hiddenOk = actualHidden === testCase.expectHidden;
+        const pass = textOk && hiddenOk;
+        if (pass) passCount++;
+
+        const caseDiv = document.createElement('div');
+        caseDiv.className = `case ${pass ? 'pass' : 'fail'}`;
+        caseDiv.innerHTML = `
+          <div class="label">${pass ? '✅' : '❌'} ${testCase.id}</div>
+          <div class="mono">input: ${JSON.stringify(testCase.input)}</div>
+          <div class="mono">esperado: ${JSON.stringify(testCase.expectedText)} (hidden=${testCase.expectHidden})</div>
+          <div class="mono">obtenido: ${JSON.stringify(actualText)} (hidden=${actualHidden})</div>
+        `;
+        resultsEl.appendChild(caseDiv);
+      }
+
+      document.getElementById('summary').textContent =
+        `${passCount} / ${CASES.length} casos OK`;
+    }
+
+    window.addEventListener('load', () => setTimeout(runTests, 300));
+  </script>
+</body>
+</html>

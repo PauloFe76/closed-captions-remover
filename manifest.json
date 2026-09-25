@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Subtitle Cleaner",
+  "version": "0.2.0",
+  "description": "Filtra en tiempo real el contenido no-dialogal de los subtítulos en Netflix.",
+  "permissions": ["storage"],
+  "action": {
+    "default_popup": "popup/popup.html"
+  },
+  "options_page": "options/options.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.netflix.com/*",
+        "file:///*"
+      ],
+      "js": [
+        "content-scripts/core/cleaner.js",
+        "content-scripts/sites/netflix.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
