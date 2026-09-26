@@ -11,6 +11,10 @@
     .label { font-weight: 600; }
     .mono { font-family: monospace; font-size: 13px; }
     #summary { font-weight: bold; margin-top: 16px; }
+    #modeBar { margin-bottom: 16px; display: flex; gap: 8px; align-items: center; }
+    #modeInfo { font-size: 13px; color: #555; margin-bottom: 12px; }
+    button.mode { padding: 6px 10px; cursor: pointer; }
+    button.mode.active { font-weight: bold; outline: 2px solid #333; }
 
     /* Estructura real de Netflix: contenedor > span wrapper > span hoja */
     .player-timedtext-text-container { display: block; }
@@ -18,7 +22,13 @@
 </head>
 <body>
   <h1>Subtitle Cleaner — Test Harness</h1>
-  <p>Nota: requiere "Permitir acceso a las URLs de archivos" habilitado para la extensión en chrome://extensions, porque el manifest matchea <code>file:///*</code> para que el content script real corra sobre esta página.</p>
+
+  <div id="modeBar">
+    <span>Modo:</span>
+    <button class="mode" id="btnFixed">Regresión (valores fijos)</button>
+    <button class="mode" id="btnCurrent">Configuración actual</button>
+  </div>
+  <div id="modeInfo"></div>
 
   <div id="results"></div>
   <div id="summary"></div>
@@ -26,83 +36,49 @@
   <!-- Cada caso instancia su propio contenedor, oculto hasta que se corre el test -->
   <div id="sandbox" style="display: none;"></div>
 
+  <!-- Se cargan directo como scripts de la extensión: no depende de que el
+       manifest matchee file:///*, así no requiere el permiso especial
+       "permitir acceso a las URLs de archivos". -->
+  <script src="../content-scripts/core/cleaner.js"></script>
+  <script src="../content-scripts/sites/netflix.js"></script>
   <script>
-    // Estado de reglas usado para correr los tests: replica el default del
-    // popup (corchetes ON, speaker label ON, paréntesis OFF).
-    const DEFAULT_RULE_STATES = {
+    // Regresión: valores fijos, independientes de lo que el usuario tenga
+    // configurado. Detecta si el regex en sí se rompió.
+    const FIXED_RULE_STATES = {
       brackets: true,
       speakerLabel: true,
       parentheses: false,
     };
 
     const CASES = [
-      {
-        id: 'brackets_simple',
-        input: '[music playing]',
-        expectedText: '',
-        expectHidden: true,
-      },
-      {
-        id: 'brackets_with_dialogue',
-        input: '[door creaking] Who\'s there?',
-        expectedText: "Who's there?",
-        expectHidden: false,
-      },
-      {
-        id: 'multiple_brackets',
-        input: '[music playing] [indistinct chatter]',
-        expectedText: '',
-        expectHidden: true,
-      },
-      {
-        id: 'speaker_label_only',
-        input: 'JOHN:',
-        expectedText: '',
-        expectHidden: true,
-      },
-      {
-        id: 'speaker_label_with_brackets',
-        input: 'JOHN: [sighs] I told you already.',
-        expectedText: 'I told you already.',
-        expectHidden: false,
-      },
-      {
-        id: 'pure_dialogue_control',
-        input: "I can't believe this is happening.",
-        expectedText: "I can't believe this is happening.",
-        expectHidden: false,
-      },
-      {
-        id: 'parentheses_untouched',
-        input: '(laughs) That was close.',
-        // parentheses está OFF por defecto -> no se toca
-        expectedText: '(laughs) That was close.',
-        expectHidden: false,
-      },
-      {
-        id: 'malformed_bracket',
-        input: '[music playing without closing bracket',
-        // no matchea el regex (falta el ]), no debe romper ni vaciar
-        expectedText: '[music playing without closing bracket',
-        expectHidden: false,
-      },
-      {
-        id: 'two_lines_different_speakers',
-        input: "MARY: Wait.\nJOHN: For what?",
-        // el regex de speaker label es ^...: por línea sin flag "m",
-        // así que solo el primer speaker de la línea 1 se limpia si se
-        // trata como un único texto de span; documentado como
-        // comportamiento esperado, no bug.
-        expectedText: 'Wait.\nJOHN: For what?',
-        expectHidden: false,
-      },
-      {
-        id: 'speaker_apostrophe_hyphen',
-        input: "MARY-ANNE'S VOICE: Come in.",
-        expectedText: 'Come in.',
-        expectHidden: false,
-      },
+      { id: 'brackets_simple', input: '[music playing]' },
+      { id: 'brackets_with_dialogue', input: "[door creaking] Who's there?" },
+      { id: 'multiple_brackets', input: '[music playing] [indistinct chatter]' },
+      { id: 'speaker_label_only', input: 'JOHN:' },
+      { id: 'speaker_label_with_brackets', input: 'JOHN: [sighs] I told you already.' },
+      { id: 'pure_dialogue_control', input: "I can't believe this is happening." },
+      { id: 'parentheses_untouched', input: '(laughs) That was close.' },
+      { id: 'malformed_bracket', input: '[music playing without closing bracket' },
+      { id: 'two_lines_different_speakers', input: 'MARY: Wait.\nJOHN: For what?' },
+      { id: 'speaker_apostrophe_hyphen', input: "MARY-ANNE'S VOICE: Come in." },
     ];
+
+    // Valores esperados hardcodeados a mano para el modo regresión — NO se
+    // calculan llamando a SubtitleCleaner.clean(), para que sigan siendo
+    // válidos aunque el regex se rompa (si no, un regex roto "aprendería"
+    // su propio resultado incorrecto como correcto).
+    const FIXED_EXPECTED = {
+      brackets_simple: '',
+      brackets_with_dialogue: "Who's there?",
+      multiple_brackets: '',
+      speaker_label_only: '',
+      speaker_label_with_brackets: 'I told you already.',
+      pure_dialogue_control: "I can't believe this is happening.",
+      parentheses_untouched: '(laughs) That was close.',
+      malformed_bracket: '[music playing without closing bracket',
+      two_lines_different_speakers: 'Wait.\nJOHN: For what?',
+      speaker_apostrophe_hyphen: 'Come in.',
+    };
 
     function buildCaseDOM(testCase) {
       const container = document.createElement('div');
@@ -118,23 +94,44 @@
       return container;
     }
 
-    async function runTests() {
-      // El content script real (cleaner.js + netflix.js) ya está corriendo
-      // sobre esta página porque el manifest matchea file:///*.
-      // Le seteamos el estado de reglas esperado antes de inyectar los casos.
-      if (typeof SubtitleCleaner === 'undefined') {
-        document.getElementById('summary').textContent =
-          '⚠️ SubtitleCleaner no está definido — ¿está la extensión cargada y con acceso a archivos habilitado?';
-        return;
+    function describeRuleStates(states) {
+      return SubtitleCleaner.DEFAULT_RULES
+        .map((r) => `${r.label}: ${states[r.id] ? 'ON' : 'OFF'}`)
+        .join(' · ');
+    }
+
+    async function runTests(mode) {
+      document.getElementById('btnFixed').classList.toggle('active', mode === 'fixed');
+      document.getElementById('btnCurrent').classList.toggle('active', mode === 'current');
+
+      let ruleStates;
+      if (mode === 'fixed') {
+        ruleStates = FIXED_RULE_STATES;
+      } else {
+        // Lee la config real guardada por el usuario en Opciones, SIN
+        // pisarla — solo lectura.
+        ruleStates = await new Promise((resolve) => {
+          chrome.storage.local.get(['subtitleCleanerRuleStates'], (result) => {
+            resolve(
+              result.subtitleCleanerRuleStates ??
+                Object.fromEntries(
+                  SubtitleCleaner.DEFAULT_RULES.map((r) => [r.id, r.enabledByDefault])
+                )
+            );
+          });
+        });
       }
-      SubtitleCleaner.setRuleStates(DEFAULT_RULE_STATES);
-      chrome?.storage?.local?.set?.({
-        subtitleCleanerEnabled: true,
-        subtitleCleanerRuleStates: DEFAULT_RULE_STATES,
-      });
+
+      SubtitleCleaner.setRuleStates(ruleStates);
+      document.getElementById('modeInfo').textContent =
+        mode === 'fixed'
+          ? `Corriendo con valores fijos → ${describeRuleStates(ruleStates)}`
+          : `Corriendo con tu configuración real (Opciones) → ${describeRuleStates(ruleStates)}`;
 
       const sandbox = document.getElementById('sandbox');
+      sandbox.innerHTML = '';
       const resultsEl = document.getElementById('results');
+      resultsEl.innerHTML = '';
       let passCount = 0;
 
       for (const testCase of CASES) {
@@ -148,9 +145,15 @@
         const actualText = leaf.textContent;
         const actualHidden = container.style.display === 'none';
 
-        const textOk = actualText === testCase.expectedText;
-        const hiddenOk = actualHidden === testCase.expectHidden;
-        const pass = textOk && hiddenOk;
+        // Modo fijo: comparamos contra el valor hardcodeado a mano.
+        // Modo actual: comparamos contra lo que da SubtitleCleaner.clean()
+        // con el estado real — esto valida el CABLEADO (storage → DOM),
+        // no el regex en sí (para eso está el modo fijo).
+        const expectedText =
+          mode === 'fixed' ? FIXED_EXPECTED[testCase.id] : SubtitleCleaner.clean(testCase.input);
+        const expectedHidden = expectedText === '';
+
+        const pass = actualText === expectedText && actualHidden === expectedHidden;
         if (pass) passCount++;
 
         const caseDiv = document.createElement('div');
@@ -158,17 +161,19 @@
         caseDiv.innerHTML = `
           <div class="label">${pass ? '✅' : '❌'} ${testCase.id}</div>
           <div class="mono">input: ${JSON.stringify(testCase.input)}</div>
-          <div class="mono">esperado: ${JSON.stringify(testCase.expectedText)} (hidden=${testCase.expectHidden})</div>
+          <div class="mono">esperado: ${JSON.stringify(expectedText)} (hidden=${expectedHidden})</div>
           <div class="mono">obtenido: ${JSON.stringify(actualText)} (hidden=${actualHidden})</div>
         `;
         resultsEl.appendChild(caseDiv);
       }
 
-      document.getElementById('summary').textContent =
-        `${passCount} / ${CASES.length} casos OK`;
+      document.getElementById('summary').textContent = `${passCount} / ${CASES.length} casos OK`;
     }
 
-    window.addEventListener('load', () => setTimeout(runTests, 300));
+    document.getElementById('btnFixed').addEventListener('click', () => runTests('fixed'));
+    document.getElementById('btnCurrent').addEventListener('click', () => runTests('current'));
+
+    window.addEventListener('load', () => setTimeout(() => runTests('fixed'), 200));
   </script>
 </body>
 </html>

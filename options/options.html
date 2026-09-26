@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Subtitle Cleaner — Opciones</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 480px;
+      margin: 24px auto;
+      padding: 0 16px;
+    }
+    h1 {
+      font-size: 18px;
+    }
+    .rule {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .rule input {
+      margin-top: 3px;
+    }
+    .rule-label {
+      font-weight: 600;
+    }
+    .rule-example {
+      font-size: 12px;
+      color: #777;
+      font-family: monospace;
+    }
+    .saved-msg {
+      font-size: 12px;
+      color: green;
+      height: 16px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Reglas de filtrado</h1>
+  <p>Elegí qué tipo de contenido no-dialogal se oculta de los subtítulos.</p>
+
+  <div id="rulesContainer"></div>
+  <div class="saved-msg" id="savedMsg"></div>
+
+  <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;" />
+  <p style="font-size: 13px; color: #555;">
+    ¿Tocaste el código de limpieza? Corré el
+    <a href="#" id="testHarnessLink">test harness</a> para confirmar que los
+    casos conocidos siguen funcionando.
+  </p>
+
+  <script src="../content-scripts/core/cleaner.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

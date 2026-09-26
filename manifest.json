@@ -11,8 +11,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.netflix.com/*",
-        "file:///*"
+        "https://www.netflix.com/*"
       ],
       "js": [
         "content-scripts/core/cleaner.js",
