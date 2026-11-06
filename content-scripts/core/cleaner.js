@@ -21,8 +21,11 @@ const DEFAULT_RULES = [
     id: 'speakerLabel',
     label: 'Nombre de hablante en mayúsculas',
     example: "JOHN: ¿Qué hacés acá?",
-    pattern: "^[A-Z][A-Z0-9\\s'.-]{1,30}:\\s*",
-    flags: 'g',
+    // Espacio literal (no \s): \s incluye saltos de línea y dejaba que una
+    // línea en MAYÚSCULAS + otra con "NOMBRE:" se leyeran como un solo
+    // nombre de hablante, borrando diálogo real. Flag "m": ^ vale en cada línea.
+    pattern: "^[A-Z][A-Z0-9 '.-]{1,30}: *",
+    flags: 'gm',
     enabledByDefault: true,
   },
   {
