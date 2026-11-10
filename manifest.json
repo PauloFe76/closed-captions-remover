@@ -1,9 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Subtitle Cleaner",
-  "version": "0.2.0",
-  "description": "Filtra en tiempo real el contenido no-dialogal de los subtítulos en Netflix.",
-  "permissions": ["storage"],
+  "version": "0.3.0",
+  "description": "Filtra en tiempo real el contenido no-dialogal de los subtítulos en Netflix y Prime Video.",
+  "permissions": [
+    "storage"
+  ],
   "action": {
     "default_popup": "popup/popup.html"
   },
@@ -15,7 +17,20 @@
       ],
       "js": [
         "content-scripts/core/cleaner.js",
+        "content-scripts/core/subtitle-observer.js",
         "content-scripts/sites/netflix.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.primevideo.com/*",
+        "https://www.amazon.com/gp/video/*"
+      ],
+      "js": [
+        "content-scripts/core/cleaner.js",
+        "content-scripts/core/subtitle-observer.js",
+        "content-scripts/sites/prime.js"
       ],
       "run_at": "document_idle"
     }
